@@ -1,0 +1,5 @@
+{
+  "name": "PhotoCull Pro",
+  "description": "A high-performance local image culling application with gesture-based 'Keep or Delete' sorting. Effortlessly process thousands of photos using a Tinder-style swipe interface.",
+  "requestFramePermissions": []
+}
