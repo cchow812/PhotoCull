@@ -21,14 +21,12 @@ export class DBService {
   }
 
   async init(): Promise<void> {
-    // 1. Check PocketBase
     try {
       await fetch(`${PB_URL}/api/health`);
     } catch (e) {
       console.warn("PocketBase unreachable. Ensure it is running at http://127.0.0.1:8090");
     }
 
-    // 2. Init Local IndexedDB for FileSystemHandles
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(IDB_NAME, 1);
       request.onupgradeneeded = (e) => {
@@ -43,13 +41,23 @@ export class DBService {
     });
   }
 
-  // Local Handle Management
   async storeHandleLocally(directoryName: string, handle: FileSystemDirectoryHandle): Promise<void> {
     if (!this.idb) await this.init();
     return new Promise((resolve, reject) => {
       const tx = this.idb!.transaction(IDB_STORE, 'readwrite');
       const store = tx.objectStore(IDB_STORE);
       const request = store.put(handle, directoryName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteHandleLocally(directoryName: string): Promise<void> {
+    if (!this.idb) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.idb!.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      const request = store.delete(directoryName);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
@@ -66,7 +74,6 @@ export class DBService {
     });
   }
 
-  // PocketBase Operations
   async saveSession(session: CullSession): Promise<void> {
     try {
       const existing = await this.pb.collection('sessions').getFirstListItem(`directoryName="${session.directoryName}"`).catch(() => null);
@@ -84,7 +91,6 @@ export class DBService {
         await this.pb.collection('sessions').create(data);
       }
 
-      // If we have a handle in memory, store it locally for resume support
       if (session.handle) {
         await this.storeHandleLocally(session.directoryName, session.handle);
       }
@@ -153,6 +159,29 @@ export class DBService {
     } catch (err) {
       return {};
     }
+  }
+
+  async relinkSession(oldPath: string, newPath: string, newHandle: FileSystemDirectoryHandle, onProgress?: (count: number, total: number) => void): Promise<void> {
+    // 1. Update Session Record
+    const sessionRecord = await this.pb.collection('sessions').getFirstListItem(`directoryName="${oldPath}"`).catch(() => null);
+    if (sessionRecord) {
+      await this.pb.collection('sessions').update(sessionRecord.id, { directoryName: newPath });
+    }
+
+    // 2. Migrate Decisions
+    const decisions = await this.pb.collection('decisions').getFullList({ filter: `directoryName="${oldPath}"` });
+    const total = decisions.length;
+    let count = 0;
+
+    for (const record of decisions) {
+      await this.pb.collection('decisions').update(record.id, { directoryName: newPath });
+      count++;
+      if (onProgress) onProgress(count, total);
+    }
+
+    // 3. Update Local Handle
+    await this.deleteHandleLocally(oldPath);
+    await this.storeHandleLocally(newPath, newHandle);
   }
 }
 

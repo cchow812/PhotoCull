@@ -66,3 +66,43 @@ export function revokeImageUrl(url: string) {
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * Directly removes a file from the disk. 
+ * Requires 'readwrite' permission on the directory handle.
+ */
+export async function deleteFile(fileHandle: FileSystemFileHandle): Promise<void> {
+  // @ts-ignore - remove is supported in modern browsers on FileSystemFileHandle
+  if (typeof fileHandle.remove === 'function') {
+    // @ts-ignore
+    await fileHandle.remove();
+  } else {
+    throw new Error("Deletion not supported in this browser version.");
+  }
+}
+
+/**
+ * Generates a batch/sh script text for mass deletion based on full qualified paths.
+ */
+export function generateDeletionScript(images: ImageItem[], rootPath: string, platform: 'win' | 'unix'): string {
+  const toDelete = images.filter(img => img.decision === 'delete');
+  
+  if (platform === 'win') {
+    let script = "@echo off\necho PhotoCull Pro: Deleting " + toDelete.length + " files...\n";
+    toDelete.forEach(img => {
+      // Use backslashes for Windows, construct full path
+      const fullPath = `${rootPath}/${img.relativePath}`.replace(/\//g, '\\');
+      script += `del /f /q "${fullPath}"\n`;
+    });
+    script += "echo Cleanup complete.\npause";
+    return script;
+  } else {
+    let script = "#!/bin/bash\necho \"PhotoCull Pro: Deleting " + toDelete.length + " files...\"\n";
+    toDelete.forEach(img => {
+      const fullPath = `${rootPath}/${img.relativePath}`;
+      script += `rm -f "${fullPath}"\n`;
+    });
+    script += "echo \"Cleanup complete.\"";
+    return script;
+  }
+}
